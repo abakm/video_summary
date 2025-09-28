@@ -1,6 +1,11 @@
+from threading import Thread
 from pydantic import ValidationError
 from flask import Flask, request, jsonify
+
 from common import PayloadTemplate, video_db
+from graph.workflow import summary_extraction
+
+
 app = Flask(__name__)
 
 
@@ -12,15 +17,10 @@ def post():
     except ValidationError as e:
         return jsonify(message=str(e)), 400
 
-    if request.form:
-        video['source_url'] = request.files['file'].filename
-
-    if not video.get("source_url", None):
-        return jsonify(message="Source URL is missing"), 400
     video_ids = video_db.distinct("_id")
-    video["_id"] = max(video_ids) + 1 if video_ids else 1
-    video_db.insert_one(video)
-
+    video = video | dict(_id=max(video_ids) + 1 if video_ids else 1, progress=list())
+    video_db.insert_one(video | dict(progress=list()))
+    Thread(target=summary_extraction, args=(video["_id"], video['youtube_url'])).start()
     return jsonify(dict(video_id=video["_id"])), 200
 
 
@@ -31,9 +31,6 @@ def get(video_id: int):
         return jsonify(video), 200
     else:
         return jsonify(message="Not found"), 404
-
-
-
 
 
 # main driver function
